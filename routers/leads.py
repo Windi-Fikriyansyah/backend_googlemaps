@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import schemas, services, models, database
+from routers.auth import get_current_user, get_current_user_strict
+from typing import Optional, List
 
 router = APIRouter(
     prefix="/leads",
@@ -8,15 +10,19 @@ router = APIRouter(
 )
 
 @router.post("/search", response_model=schemas.SearchResponse)
-def search_leads(request: schemas.SearchRequest, db: Session = Depends(database.get_db)):
+def search_leads(
+    request: schemas.SearchRequest, 
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(get_current_user)
+):
     """
-    Search for leads with Smart Hybrid Caching:
-    1. Find all unique leads in DB for (keyword, location, radius).
-    2. If DB has enough leads, return them immediately (0 API calls).
-    3. If DB has some leads but not enough, fetch only the 'gap' from API.
-    4. Link new leads to a new search record and return combined data.
+    Search for leads with Smart Hybrid Caching.
+    If not logged in, it uses user_id=1 as a fallback for search history.
     """
-    # 1. Identify all unique leads already stored for this criteria across all searches
+    # 0. Handle guest or invalid session
+    user_id = current_user.id if current_user else 1
+    
+    # 1. Identify all unique leads already stored for this criteria
     # We use func.lower() for case-insensitive matching
     existing_leads_query = db.query(models.Lead).join(models.Lead.searches).filter(
         models.func.lower(models.Search.keyword) == request.keyword.lower(),
@@ -29,12 +35,29 @@ def search_leads(request: schemas.SearchRequest, db: Session = Depends(database.
 
     if cached_count >= request.max_results:
         print(f"DEBUG: Smart Cache HIT (Full). Found {cached_count} leads, user asked for {request.max_results}.")
+        
+        saved_lead_ids = {l.id for l in current_user.saved_leads} if current_user else set()
+        leads_with_saved_status = []
+        for lead in existing_leads[:request.max_results]:
+            lead_dict = {
+                "id": lead.id,
+                "google_place_id": lead.google_place_id,
+                "name": lead.name,
+                "address": lead.address,
+                "phone": lead.phone,
+                "website": lead.website,
+                "rating": lead.rating,
+                "category": lead.category,
+                "is_saved": lead.id in saved_lead_ids
+            }
+            leads_with_saved_status.append(lead_dict)
+
         return schemas.SearchResponse(
             search_id=0, # Virtual or last search ID
             keyword=request.keyword,
             location_name=request.location_name,
             total_results=request.max_results,
-            leads=existing_leads[:request.max_results]
+            leads=leads_with_saved_status
         )
 
     # 2. If we reach here, we need more data from the API
@@ -62,7 +85,7 @@ def search_leads(request: schemas.SearchRequest, db: Session = Depends(database.
     
     # 3. Create a new search record for this request
     new_search = models.Search(
-        user_id=1, 
+        user_id=user_id, 
         keyword=request.keyword,
         location_name=request.location_name,
         radius=request.radius,
@@ -83,10 +106,76 @@ def search_leads(request: schemas.SearchRequest, db: Session = Depends(database.
     db.commit()
     db.refresh(new_search)
 
+    # Create response with is_saved status
+    saved_lead_ids = {l.id for l in current_user.saved_leads} if current_user else set()
+    leads_with_saved_status = []
+    for lead in (existing_leads[:request.max_results] if cached_count >= request.max_results else new_search.leads):
+        lead_dict = {
+            "id": lead.id,
+            "google_place_id": lead.google_place_id,
+            "name": lead.name,
+            "address": lead.address,
+            "phone": lead.phone,
+            "website": lead.website,
+            "rating": lead.rating,
+            "category": lead.category,
+            "is_saved": lead.id in saved_lead_ids
+        }
+        leads_with_saved_status.append(lead_dict)
+
     return schemas.SearchResponse(
-        search_id=new_search.id,
+        search_id=new_search.id if cached_count < request.max_results else 0,
         keyword=request.keyword,
         location_name=request.location_name,
-        total_results=len(new_search.leads),
-        leads=new_search.leads
+        total_results=len(leads_with_saved_status),
+        leads=leads_with_saved_status
     )
+
+@router.post("/save")
+def save_lead(
+    request: schemas.LeadSaveRequest,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user_strict)
+):
+    lead = db.query(models.Lead).filter(models.Lead.id == request.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    if lead not in current_user.saved_leads:
+        current_user.saved_leads.append(lead)
+        db.commit()
+    
+    return {"message": "Lead saved successfully"}
+
+@router.post("/save-batch")
+def save_leads_batch(
+    request: schemas.LeadSaveBatchRequest,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user_strict)
+):
+    leads = db.query(models.Lead).filter(models.Lead.id.in_(request.lead_ids)).all()
+    
+    count = 0
+    for lead in leads:
+        if lead not in current_user.saved_leads:
+            current_user.saved_leads.append(lead)
+            count += 1
+            
+    if count > 0:
+        db.commit()
+    
+    return {"message": f"{count} leads saved successfully"}
+
+@router.get("/saved", response_model=List[schemas.LeadResponse])
+def get_saved_leads(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user_strict)
+):
+    # Simply return the relationship data
+    # We map it to ensure the is_saved field is True
+    leads = []
+    for lead in current_user.saved_leads:
+        lead_dict = schemas.LeadResponse.model_validate(lead)
+        lead_dict.is_saved = True
+        leads.append(lead_dict)
+    return leads

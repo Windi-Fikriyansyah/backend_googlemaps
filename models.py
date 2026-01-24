@@ -3,12 +3,21 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 
-# Association table for Many-to-Many relationship
+# Association table for Search - Lead relationship (History)
 search_leads = Table(
     "search_leads",
     Base.metadata,
     Column("search_id", Integer, ForeignKey("searches.id", ondelete="CASCADE"), primary_key=True),
     Column("lead_id", Integer, ForeignKey("leads.id", ondelete="CASCADE"), primary_key=True),
+)
+
+# Association table for User - Lead relationship (Saved Leads)
+user_saved_leads = Table(
+    "user_saved_leads",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("lead_id", Integer, ForeignKey("leads.id", ondelete="CASCADE"), primary_key=True),
+    Column("timestamp", DateTime(timezone=True), server_default=func.now()),
 )
 
 class User(Base):
@@ -20,6 +29,7 @@ class User(Base):
     plan_type = Column(String, default="free")  # free/pro
 
     searches = relationship("Search", back_populates="user")
+    saved_leads = relationship("Lead", secondary=user_saved_leads, back_populates="saved_by_users")
 
 class Search(Base):
     __tablename__ = "searches"
@@ -48,3 +58,4 @@ class Lead(Base):
     category = Column(String, nullable=True)
 
     searches = relationship("Search", secondary=search_leads, back_populates="leads")
+    saved_by_users = relationship("User", secondary=user_saved_leads, back_populates="saved_leads")

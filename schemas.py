@@ -11,6 +11,7 @@ class LeadBase(BaseModel):
     website: Optional[str] = None
     rating: Optional[float] = None
     category: Optional[str] = None
+    is_saved: Optional[bool] = False
 
 class LeadCreate(LeadBase):
     search_id: int
@@ -18,6 +19,12 @@ class LeadCreate(LeadBase):
 class LeadResponse(LeadBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
+
+class LeadSaveRequest(BaseModel):
+    lead_id: int
+
+class LeadSaveBatchRequest(BaseModel):
+    lead_ids: List[int]
 
 # Search
 class SearchRequest(BaseModel):

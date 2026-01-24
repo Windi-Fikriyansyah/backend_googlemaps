@@ -18,12 +18,22 @@ with engine.connect() as conn:
         conn.execute(text("ALTER TABLE searches ADD COLUMN IF NOT EXISTS radius FLOAT"))
         conn.execute(text("ALTER TABLE searches ADD COLUMN IF NOT EXISTS max_results INTEGER DEFAULT 20"))
         
-        # Create Many-to-Many association table
+        # Create Many-to-Many association table for search results
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS search_leads (
                 search_id INTEGER REFERENCES searches(id) ON DELETE CASCADE,
                 lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
                 PRIMARY KEY (search_id, lead_id)
+            )
+        """))
+        
+        # Create Many-to-Many association table for Saved Leads
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_saved_leads (
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, lead_id)
             )
         """))
         conn.commit()
