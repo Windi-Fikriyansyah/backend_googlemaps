@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
@@ -25,7 +25,17 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
+def get_current_user(request: Request, db: Session = Depends(database.get_db)):
+    token = request.cookies.get("access_token")
+    if not token:
+        # Fallback to header for compatibility during transition or other clients
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+    
+    if not token:
+        return None
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -35,22 +45,21 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
-            raise credentials_exception
+            return None
     except JWTError:
-        raise credentials_exception
+        return None
+        
     user = db.query(models.User).filter(models.User.email == email).first()
-    if user is None:
-        raise credentials_exception
     return user
 
-def get_current_user_strict(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
-    if not token:
+def get_current_user_strict(user: models.User = Depends(get_current_user)):
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Login required to save leads",
+            detail="Login required",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return get_current_user(token, db)
+    return user
 
 # Helpers
 def verify_password(plain_password, hashed_password):
@@ -64,7 +73,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -76,48 +85,75 @@ def register(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
         raise HTTPException(status_code=400, detail="Email already registered")
     
     hashed_password = get_password_hash(user.password)
-    new_user = models.User(email=user.email, password_hash=hashed_password)
+    new_user = models.User(email=user.email, name=user.name, password_hash=hashed_password)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
     return new_user
 
-@router.post("/login", response_model=schemas.Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
+@router.post("/login")
+def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
         )
     
     access_token = create_access_token(data={"sub": user.email})
-    return {"access_token": access_token, "token_type": "bearer"}
+    
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        expires=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        samesite="lax",
+        secure=False, # Set to True in production with HTTPS
+    )
+    return {"message": "Logged in successfully", "user": {"email": user.email}}
 
-@router.post("/google", response_model=schemas.Token)
-def google_login(request: schemas.GoogleLoginRequest, db: Session = Depends(database.get_db)):
+@router.post("/google")
+def google_login(response: Response, request: schemas.GoogleLoginRequest, db: Session = Depends(database.get_db)):
     try:
-        print(f"DEBUG: GOOGLE_CLIENT_ID used for verification: {GOOGLE_CLIENT_ID}")
         if not GOOGLE_CLIENT_ID:
             raise HTTPException(status_code=500, detail="Google Client ID not configured on server")
             
-        # Verify the token
-        print(f"DEBUG: Verifying credential: {request.credential[:20]}...")
         idinfo = id_token.verify_oauth2_token(request.credential, requests.Request(), GOOGLE_CLIENT_ID)
-        
         email = idinfo['email']
+        name = idinfo.get('name', None)  # Get name from Google profile
         
         user = db.query(models.User).filter(models.User.email == email).first()
         if not user:
-            # Create user if not exists
-            user = models.User(email=email, password_hash="google-auth-no-password", plan_type="free")
+            user = models.User(email=email, name=name, password_hash="google-auth-no-password", plan_type="free")
             db.add(user)
             db.commit()
             db.refresh(user)
+        elif not user.name and name:
+            # Update name if user exists but has no name
+            user.name = name
+            db.commit()
             
         access_token = create_access_token(data={"sub": user.email})
-        return {"access_token": access_token, "token_type": "bearer"}
+        
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            expires=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            samesite="lax",
+            secure=False,
+        )
+        return {"message": "Logged in successfully", "user": {"email": user.email}}
     except Exception as e:
-        print(f"ERROR: Google token verification failed: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Invalid Google token: {str(e)}")
+
+@router.post("/logout")
+def logout(response: Response):
+    response.delete_cookie(key="access_token")
+    return {"message": "Logged out successfully"}
+
+@router.get("/me", response_model=schemas.UserResponse)
+def get_me(current_user: models.User = Depends(get_current_user_strict)):
+    return current_user

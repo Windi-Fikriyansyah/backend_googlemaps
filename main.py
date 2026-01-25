@@ -36,6 +36,33 @@ with engine.connect() as conn:
                 PRIMARY KEY (user_id, lead_id)
             )
         """))
+        
+        # Create message_templates table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS message_templates (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                name VARCHAR,
+                content TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        # Create whatsapp_devices table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS whatsapp_devices (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                name VARCHAR,
+                device_number VARCHAR,
+                token VARCHAR,
+                status VARCHAR DEFAULT 'disconnected',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        # Ensure device_number column exists for existing tables
+        conn.execute(text("ALTER TABLE whatsapp_devices ADD COLUMN IF NOT EXISTS device_number VARCHAR"))
+        # Add name column to users table
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR"))
         conn.commit()
     except Exception as e:
         print(f"Auto-migration info (this might be normal): {e}")
@@ -60,14 +87,19 @@ app = FastAPI(title="Lead Generation API")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, replace with specific origins
+    allow_origins=["http://localhost:3000"], # Updated for current dev port
     allow_credentials=True,
+
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
 app.include_router(leads.router)
 app.include_router(auth.router)
+from routers import whatsapp
+app.include_router(whatsapp.router)
+
 
 @app.get("/")
 def read_root():

@@ -47,9 +47,11 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+    name: Optional[str] = None
 
 class UserResponse(UserBase):
     id: int
+    name: Optional[str] = None
     plan_type: str
     model_config = ConfigDict(from_attributes=True)
 
@@ -63,3 +65,83 @@ class TokenData(BaseModel):
 
 class GoogleLoginRequest(BaseModel):
     credential: str
+
+# WhatsApp Broadcast
+class MessageTemplateBase(BaseModel):
+    name: str
+    content: str
+
+class MessageTemplateCreate(MessageTemplateBase):
+    pass
+
+class MessageTemplateResponse(MessageTemplateBase):
+    id: int
+    user_id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+class BroadcastRequest(BaseModel):
+    lead_ids: List[int]
+    device_id: Optional[int] = None
+    template_id: Optional[int] = None
+    custom_content: Optional[str] = None
+    delay: Optional[int] = 3 # Default to 2 seconds for safety
+
+
+# WhatsApp Device
+class WhatsAppDeviceBase(BaseModel):
+    name: str
+
+class WhatsAppDeviceCreate(WhatsAppDeviceBase):
+    device: str # Phone number for Fonnte creation
+
+class WhatsAppDeviceUpdate(BaseModel):
+    name: Optional[str] = None
+
+class WhatsAppDeviceResponse(WhatsAppDeviceBase):
+    id: int
+    user_id: int
+    device_number: Optional[str] = None
+    status: str
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+# Message History
+class MessageHistoryResponse(BaseModel):
+    id: str
+    user_id: int
+    target: str
+    message: str
+    status: str
+    state: Optional[str] = None
+    stateid: Optional[str] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+# Fonnte Webhook
+class FonnteWebhookPayload(BaseModel):
+    device: Optional[str] = None
+    id: Optional[str] = None
+    stateid: Optional[str] = None
+    status: Optional[str] = None
+    state: Optional[str] = None
+    sender: Optional[str] = None
+    message: Optional[str] = None
+    member: Optional[str] = None
+    name: Optional[str] = None
+    pesan: Optional[str] = None  # incoming message text
+    pengirim: Optional[str] = None  # sender number
+    url: Optional[str] = None  # media url if any
+    filename: Optional[str] = None
+    extension: Optional[str] = None
+    
+    model_config = ConfigDict(extra='allow')  # Allow extra fields from Fonnte
+
+# Fonnte Connection Webhook
+class FonnteConnectPayload(BaseModel):
+    device: Optional[str] = None
+    status: Optional[str] = None  # "connect" or "disconnect"
+    token: Optional[str] = None   # Device token from Fonnte
+    
+    model_config = ConfigDict(extra='allow')  # Allow extra fields from Fonnte
+
