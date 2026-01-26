@@ -65,11 +65,16 @@ def get_current_user_strict(user: models.User = Depends(get_current_user)):
     return user
 
 # Helpers
+# Bcrypt has a maximum password length of 72 bytes
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    # Truncate password to 72 bytes to prevent bcrypt error in production
+    truncated_password = plain_password[:72] if plain_password else plain_password
+    return pwd_context.verify(truncated_password, hashed_password)
 
 def get_password_hash(password):
-    return pwd_context.hash(password)
+    # Truncate password to 72 bytes to prevent bcrypt error in production
+    truncated_password = password[:72] if password else password
+    return pwd_context.hash(truncated_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
