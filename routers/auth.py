@@ -100,7 +100,7 @@ def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends(), 
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="email dan password salah",
         )
     
     access_token = create_access_token(data={"sub": user.email})
