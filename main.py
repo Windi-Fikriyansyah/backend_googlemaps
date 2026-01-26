@@ -106,7 +106,7 @@ app = FastAPI(title="Lead Generation API")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://wamaps.myxyzz.online", "http://localhost:3000"], # Updated for current dev port
+    allow_origins=["https://wamaps.myxyzz.online"], # Updated for current dev port
     allow_credentials=True,
 
     allow_methods=["*"],
