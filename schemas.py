@@ -53,6 +53,7 @@ class UserResponse(UserBase):
     id: int
     name: Optional[str] = None
     plan_type: str
+    credits: int
     model_config = ConfigDict(from_attributes=True)
 
 # Auth

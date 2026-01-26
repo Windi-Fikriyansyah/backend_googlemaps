@@ -79,6 +79,13 @@ def send_broadcast(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user_strict)
 ):
+    # 0. Check if user has ANY credits
+    if current_user.credits <= 0:
+        raise HTTPException(
+            status_code=403, 
+            detail="Insufficient credits. Please top up your account to send messages."
+        )
+
     # 1. Get Device Token
     device_token = ""
     if request.device_id:
@@ -222,6 +229,14 @@ async def fonnte_webhook(
         ).first()
         
         if message:
+            # Check for SENT status to deduct credit
+            if status == "sent" and not message.credits_deducted:
+                user = db.query(models.User).filter(models.User.id == message.user_id).first()
+                if user:
+                    user.credits = max(0, user.credits - 1)
+                    message.credits_deducted = True
+                    print(f"DEBUG: Deducted 1 credit from user {user.id} for message {message.id}")
+
             if status:
                 message.status = status
             if state:
@@ -339,6 +354,14 @@ def refresh_message_status(
             if result.get("status"):
                 new_status = result.get("message_status", msg.status)
                 if new_status and new_status != msg.status:
+                    # Deduct credit if status becomes "sent"
+                    if new_status == "sent" and not msg.credits_deducted:
+                        user = db.query(models.User).filter(models.User.id == msg.user_id).first()
+                        if user:
+                            user.credits = max(0, user.credits - 1)
+                            msg.credits_deducted = True
+                            print(f"DEBUG: Deducted 1 credit from user {user.id} for message {msg.id} via refresh")
+                    
                     msg.status = new_status
                     updated_count += 1
         except Exception as e:

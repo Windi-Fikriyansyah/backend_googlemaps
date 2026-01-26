@@ -20,7 +20,21 @@ def search_leads(
     If not logged in, it uses user_id=1 as a fallback for search history.
     """
     # 0. Handle guest or invalid session
-    user_id = current_user.id if current_user else 1
+    if not current_user:
+        # If no user, we use admin (id=1) but maybe we should enforce login for searching if credits are involved?
+        # For now, let's keep the user_id=1 fallback but check credits if it's a real user.
+        user_id = 1
+        user = db.query(models.User).filter(models.User.id == 1).first()
+    else:
+        user_id = current_user.id
+        user = current_user
+
+    # 0.1 Check if user has ANY credits
+    if user.credits <= 0:
+        raise HTTPException(
+            status_code=403, 
+            detail="Insufficient credits. Please top up your account."
+        )
     
     # 1. Identify all unique leads already stored for this criteria
     # We use func.lower() for case-insensitive matching
@@ -52,11 +66,17 @@ def search_leads(
             }
             leads_with_saved_status.append(lead_dict)
 
+        # Deduct credits for cached results
+        num_results = len(leads_with_saved_status)
+        user.credits = max(0, user.credits - num_results)
+        db.commit()
+        db.refresh(user)
+
         return schemas.SearchResponse(
             search_id=0, # Virtual or last search ID
             keyword=request.keyword,
             location_name=request.location_name,
-            total_results=request.max_results,
+            total_results=num_results,
             leads=leads_with_saved_status
         )
 
@@ -123,11 +143,17 @@ def search_leads(
         }
         leads_with_saved_status.append(lead_dict)
 
+    # Deduct credits for new/combined results
+    num_results = len(leads_with_saved_status)
+    user.credits = max(0, user.credits - num_results)
+    db.commit()
+    db.refresh(user)
+
     return schemas.SearchResponse(
         search_id=new_search.id if cached_count < request.max_results else 0,
         keyword=request.keyword,
         location_name=request.location_name,
-        total_results=len(leads_with_saved_status),
+        total_results=num_results,
         leads=leads_with_saved_status
     )
 

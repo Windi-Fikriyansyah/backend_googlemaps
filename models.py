@@ -28,12 +28,14 @@ class User(Base):
     name = Column(String, nullable=True)  # User's display name
     password_hash = Column(String)
     plan_type = Column(String, default="free")  # free/pro
+    credits = Column(Integer, default=0)  # User's credit balance
 
     searches = relationship("Search", back_populates="user")
     saved_leads = relationship("Lead", secondary=user_saved_leads, back_populates="saved_by_users")
     message_templates = relationship("MessageTemplate", back_populates="user")
     whatsapp_devices = relationship("WhatsAppDevice", back_populates="user")
     message_histories = relationship("MessageHistory", back_populates="user")
+    transactions = relationship("TransactionHistory", back_populates="user")
 
 class MessageTemplate(Base):
     __tablename__ = "message_templates"
@@ -101,6 +103,24 @@ class MessageHistory(Base):
     status = Column(String) # sent, pending, etc.
     state = Column(String, nullable=True) # from webhook
     stateid = Column(String, nullable=True) # from webhook
+    credits_deducted = Column(Boolean, default=False)  # Track if credit for this message was deducted
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="message_histories")
+
+
+class TransactionHistory(Base):
+    __tablename__ = "transaction_histories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    merchant_ref = Column(String, unique=True, index=True)
+    amount = Column(Integer)
+    plan_sku = Column(String)
+    status = Column(String, default="UNPAID") # UNPAID, PAID, EXPIRED, FAILED
+    method = Column(String, nullable=True) # Payment method
+    payment_url = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", back_populates="transactions")

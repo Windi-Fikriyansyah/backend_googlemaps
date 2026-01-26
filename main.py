@@ -63,6 +63,25 @@ with engine.connect() as conn:
         conn.execute(text("ALTER TABLE whatsapp_devices ADD COLUMN IF NOT EXISTS device_number VARCHAR"))
         # Add name column to users table
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR"))
+        # Add credits column to users table
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS credits INTEGER DEFAULT 0"))
+        # Add credits_deducted column to message_histories table
+        conn.execute(text("ALTER TABLE message_histories ADD COLUMN IF NOT EXISTS credits_deducted BOOLEAN DEFAULT FALSE"))
+        # Create transaction_histories table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS transaction_histories (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                merchant_ref VARCHAR UNIQUE,
+                amount INTEGER,
+                plan_sku VARCHAR,
+                status VARCHAR DEFAULT 'UNPAID',
+                method VARCHAR,
+                payment_url VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                paid_at TIMESTAMP
+            )
+        """))
         conn.commit()
     except Exception as e:
         print(f"Auto-migration info (this might be normal): {e}")
@@ -97,8 +116,9 @@ app.add_middleware(
 
 app.include_router(leads.router)
 app.include_router(auth.router)
-from routers import whatsapp
+from routers import whatsapp, payment
 app.include_router(whatsapp.router)
+app.include_router(payment.router)
 
 
 @app.get("/")

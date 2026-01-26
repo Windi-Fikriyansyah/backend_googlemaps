@@ -26,12 +26,15 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 def get_current_user(request: Request, db: Session = Depends(database.get_db)):
-    token = request.cookies.get("access_token")
+    # Prioritize Authorization header for modern frontend apps
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        
     if not token:
-        # Fallback to header for compatibility during transition or other clients
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
+        # Fallback to cookie
+        token = request.cookies.get("access_token")
     
     if not token:
         return None
@@ -85,7 +88,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
         raise HTTPException(status_code=400, detail="Email already registered")
     
     hashed_password = get_password_hash(user.password)
-    new_user = models.User(email=user.email, name=user.name, password_hash=hashed_password)
+    new_user = models.User(email=user.email, name=user.name, password_hash=hashed_password, credits=50)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
@@ -111,7 +114,12 @@ def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends(), 
         samesite="lax",
         secure=False, # Set to True in production with HTTPS
     )
-    return {"message": "Logged in successfully", "user": {"email": user.email}}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "message": "Logged in successfully",
+        "user": {"email": user.email}
+    }
 
 @router.post("/google")
 def google_login(response: Response, request: schemas.GoogleLoginRequest, db: Session = Depends(database.get_db)):
@@ -125,7 +133,7 @@ def google_login(response: Response, request: schemas.GoogleLoginRequest, db: Se
         
         user = db.query(models.User).filter(models.User.email == email).first()
         if not user:
-            user = models.User(email=email, name=name, password_hash="google-auth-no-password", plan_type="free")
+            user = models.User(email=email, name=name, password_hash="google-auth-no-password", plan_type="free", credits=50)
             db.add(user)
             db.commit()
             db.refresh(user)
@@ -145,7 +153,12 @@ def google_login(response: Response, request: schemas.GoogleLoginRequest, db: Se
             samesite="lax",
             secure=False,
         )
-        return {"message": "Logged in successfully", "user": {"email": user.email}}
+        return {
+            "access_token": access_token, 
+            "token_type": "bearer",
+            "message": "Logged in successfully", 
+            "user": {"email": user.email}
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid Google token: {str(e)}")
 
