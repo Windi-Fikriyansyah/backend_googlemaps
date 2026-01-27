@@ -9,8 +9,61 @@ import random
 import time
 from fastapi import BackgroundTasks
 import database
+import phonenumbers
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
+
+def normalize_phone(phone: str, address: str = None) -> str:
+    """
+    Normalize phone number using phonenumbers library.
+    Optionally use address context to detect country.
+    Returns E.164 format without the '+' prefix for Fonnte.
+    """
+    if not phone:
+        return ""
+    
+    # 1. Determine region hint from address
+    default_region = "ID"
+    if address:
+        address_lower = address.lower()
+        country_map = {
+            "australia": "AU",
+            "malaysia": "MY",
+            "singapore": "SG",
+            "indonesia": "ID",
+            "united states": "US",
+            "usa": "US",
+            "united kingdom": "GB",
+            "uk": "GB",
+            "thailand": "TH",
+            "vietnam": "VN",
+            "philippines": "PH"
+        }
+        for country, code in country_map.items():
+            if country in address_lower:
+                default_region = code
+                break
+
+    try:
+        # Parse number - respects + if present, otherwise uses default_region (hinted by address)
+        parsed = phonenumbers.parse(phone, default_region)
+        
+        # If valid, format to E.164
+        if phonenumbers.is_valid_number(parsed):
+            formatted = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+            return formatted.replace("+", "")
+            
+        # Fallback: keep digits and try Indonesian logic if it looks like ID
+        cleaned = "".join(filter(str.isdigit, phone))
+        if cleaned.startswith("08") or cleaned.startswith("02"):
+            return "62" + cleaned[1:]
+        return cleaned
+    except Exception:
+        # Extreme fallback
+        cleaned = "".join(filter(str.isdigit, phone))
+        if cleaned.startswith("08") or cleaned.startswith("02"):
+            return "62" + cleaned[1:]
+        return cleaned
 
 FONNTE_TOKEN = os.getenv("FONNTE_TOKEN", "REPLACE_WITH_YOUR_FONNTE_TOKEN")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
@@ -103,10 +156,9 @@ def process_broadcast_background(
         
         for lead in leads:
             if lead.phone:
-                phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
-                if phone.startswith("08") or phone.startswith("02"):
-                    phone = "62" + phone[1:]
-                all_normalized_numbers[phone] = lead.id
+                phone = normalize_phone(lead.phone, address=lead.address)
+                if phone:
+                    all_normalized_numbers[phone] = lead.id
 
         # 2. Batch validate in groups of 500
         phone_list = list(all_normalized_numbers.keys())
@@ -146,12 +198,10 @@ def process_broadcast_background(
                 continue
 
             # Check if number is registered
-            phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
-            if phone.startswith("08") or phone.startswith("02"):
-                phone = "62" + phone[1:]
+            phone = normalize_phone(lead.phone, address=lead.address)
             
-            if phone not in registered_numbers:
-                print(f"DEBUG [Broadcast User {user_id}]: Skipping unregistered number {phone} (Lead ID: {lead.id})")
+            if not phone or phone not in registered_numbers:
+                print(f"DEBUG [Broadcast User {user_id}]: Skipping unregistered or invalid number {phone or 'NONE'} (Lead ID: {lead.id})")
                 continue
 
             # 1. Safe Delay (Random 30-60s)
@@ -506,9 +556,7 @@ def create_device(
 ):
     # Call Fonnte API to add device
     # Clean phone number
-    clean_device = device_data.device.replace(" ", "").replace("+", "").replace("-", "")
-    if clean_device.startswith("08") or clean_device.startswith("02"):
-        clean_device = "62" + clean_device[1:]
+    clean_device = normalize_phone(device_data.device)
         
     # Call Fonnte API to add device
     url = "https://api.fonnte.com/add-device"
@@ -580,9 +628,7 @@ def update_device(
         raise HTTPException(status_code=404, detail="Device not found")
         
     # Clean current device number
-    clean_device = device.device_number.replace(" ", "").replace("+", "").replace("-", "")
-    if clean_device.startswith("08") or clean_device.startswith("02"):
-        clean_device = "62" + clean_device[1:]
+    clean_device = normalize_phone(device.device_number)
         
     # Call Fonnte API to update device
     url = "https://api.fonnte.com/update-device"

@@ -13,3 +13,4 @@ python-jose[cryptography]
 python-multipart
 google-auth
 google-auth-oauthlib
+phonenumbers
