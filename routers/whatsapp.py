@@ -5,6 +5,10 @@ from routers.auth import get_current_user_strict
 from typing import List
 import requests
 import os
+import random
+import time
+from fastapi import BackgroundTasks
+import database
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
@@ -73,9 +77,101 @@ def delete_template(
     db.commit()
     return {"message": "Template deleted successfully"}
 
+def process_broadcast_background(
+    lead_ids: List[int],
+    message_content: str,
+    device_token: str,
+    user_id: int,
+    delay: int
+):
+    """
+    Background task to send messages with safe delays and batching.
+    - 30-60s random delay between messages.
+    - 15 min rest after every 20 messages.
+    """
+    db = database.SessionLocal()
+    try:
+        leads = db.query(models.Lead).filter(models.Lead.id.in_(lead_ids)).all()
+        if not leads:
+            return
+
+        sent_count = 0
+        batch_limit = 20
+
+        for i, lead in enumerate(leads):
+            if not lead.phone:
+                continue
+
+            # 1. Safe Delay (Random 30-60s)
+            # Skip delay for the very first message ever sent in this task
+            if sent_count > 0:
+                # Batch rest: if we just finished 20 messages
+                if sent_count % batch_limit == 0:
+                    print(f"DEBUG [Broadcast User {user_id}]: Batch limit reached ({batch_limit}). Resting for 15 minutes...")
+                    time.sleep(900) # 15 minutes
+                else:
+                    sleep_time = random.randint(30, 60)
+                    print(f"DEBUG [Broadcast User {user_id}]: Waiting {sleep_time}s before next message...")
+                    time.sleep(sleep_time)
+
+            # 2. Personalize Message
+            phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
+            if phone.startswith("08"):
+                phone = "628" + phone[2:]
+
+            personalized_message = message_content
+            placeholders = {
+                "{{name}}": lead.name or "",
+                "{{address}}": lead.address or "",
+                "{{phone}}": lead.phone or "",
+                "{{category}}": lead.category or ""
+            }
+            
+            for placeholder, value in placeholders.items():
+                if placeholder in personalized_message:
+                    personalized_message = personalized_message.replace(placeholder, str(value))
+
+            # 3. Send to Fonnte
+            url = "https://api.fonnte.com/send"
+            payload = {
+                'target': phone,
+                'message': personalized_message,
+                'countryCode': '62',
+                'delay': delay, # Original delay from request (per-batch delay in Fonnte if they use it)
+            }
+            headers = {'Authorization': device_token}
+
+            try:
+                response = requests.post(url, data=payload, headers=headers)
+                result = response.json()
+                
+                if result.get("status"):
+                    message_id = result.get("id", [None])[0] if isinstance(result.get("id"), list) else result.get("id")
+                    if message_id:
+                        new_history = models.MessageHistory(
+                            id=str(message_id),
+                            user_id=user_id,
+                            target=phone,
+                            message=personalized_message,
+                            status=result.get("process", "processing")
+                        )
+                        db.add(new_history)
+                        db.commit()
+                        sent_count += 1
+                        print(f"DEBUG [Broadcast User {user_id}]: Sent to {phone} (Internal ID: {lead.id})")
+                else:
+                    print(f"ERROR [Broadcast User {user_id}]: Fonnte failed for {phone}: {result.get('reason')}")
+            except Exception as e:
+                print(f"ERROR [Broadcast User {user_id}]: Exception for {phone}: {str(e)}")
+
+    finally:
+        db.close()
+        print(f"DEBUG [Broadcast User {user_id}]: Task finished. Total sent: {sent_count}")
+
 @router.post("/broadcast")
 def send_broadcast(
     request: schemas.BroadcastRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user_strict)
 ):
@@ -109,9 +205,9 @@ def send_broadcast(
     if not device_token:
         raise HTTPException(status_code=400, detail="Device token not found")
 
-    # 2. Get leads
-    leads = db.query(models.Lead).filter(models.Lead.id.in_(request.lead_ids)).all()
-    if not leads:
+    # 2. Validate leads exist
+    leads_count = db.query(models.Lead).filter(models.Lead.id.in_(request.lead_ids)).count()
+    if leads_count == 0:
         raise HTTPException(status_code=404, detail="No leads found")
         
     # 3. Get message content
@@ -129,78 +225,21 @@ def send_broadcast(
     else:
         raise HTTPException(status_code=400, detail="Template or custom content is required")
         
-    # 4. Prepare and Send Messages
-    sent_count = 0
-    errors = []
-    fonnte_results = []
-
-    for lead in leads:
-        if not lead.phone:
-            continue
-            
-        # Format phone number
-        phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
-        if phone.startswith("08"):
-            phone = "628" + phone[2:]
-            
-        # Personalize message if placeholders exist
-        personalized_message = message_content
-        placeholders = {
-            "{{name}}": lead.name or "",
-            "{{address}}": lead.address or "",
-            "{{phone}}": lead.phone or "",
-            "{{category}}": lead.category or ""
-        }
-        
-        for placeholder, value in placeholders.items():
-            if placeholder in personalized_message:
-                personalized_message = personalized_message.replace(placeholder, str(value))
-        
-        # Send to Fonnte
-        url = "https://api.fonnte.com/send"
-        payload = {
-            'target': phone,
-            'message': personalized_message,
-            'countryCode': '62',
-            'delay': request.delay,
-        }
-        headers = {
-            'Authorization': device_token
-        }
-        
-        try:
-            response = requests.post(url, data=payload, headers=headers)
-            result = response.json()
-            fonnte_results.append(result)
-            
-            if result.get("status"):
-                message_id = result.get("id", [None])[0] if isinstance(result.get("id"), list) else result.get("id")
-                if message_id:
-                    new_history = models.MessageHistory(
-                        id=str(message_id),
-                        user_id=current_user.id,
-                        target=phone,
-                        message=personalized_message,
-                        status=result.get("process", "processing")
-                    )
-                    db.add(new_history)
-                    sent_count += 1
-            else:
-                errors.append(f"Failed to send to {phone}: {result.get('reason', 'Unknown error')}")
-                
-        except Exception as e:
-            errors.append(f"Error sending to {phone}: {str(e)}")
-
-    db.commit()
-
-    if sent_count == 0 and errors:
-        raise HTTPException(status_code=500, detail=f"Failed to send any messages. Errors: {'; '.join(errors[:3])}...")
+    # 4. Start Background Task
+    background_tasks.add_task(
+        process_broadcast_background,
+        lead_ids=request.lead_ids,
+        message_content=message_content,
+        device_token=device_token,
+        user_id=current_user.id,
+        delay=request.delay or 3
+    )
 
     return {
-        "message": f"Broadcast process finished. Sent: {sent_count}, Errors: {len(errors)}",
-        "fonnte_response": fonnte_results[0] if fonnte_results else {"status": False},
-        "targets_count": sent_count,
-        "errors": errors if errors else None
+        "message": "Broadcast started in background. Messages will be sent gradually with safe delays to prevent spam detection.",
+        "targets_count": leads_count,
+        "mode": "background",
+        "batch_info": "20 messages per batch, 15 minutes rest between batches, 30-60s delay per message."
     }
 
 
