@@ -101,12 +101,11 @@ def process_broadcast_background(
         registered_numbers = set()
         all_normalized_numbers = {} # phone -> lead_id mapping for reverse lookup if needed
         
-        # 1. Normalize all numbers
         for lead in leads:
             if lead.phone:
                 phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
-                if phone.startswith("08"):
-                    phone = "628" + phone[2:]
+                if phone.startswith("08") or phone.startswith("02"):
+                    phone = "62" + phone[1:]
                 all_normalized_numbers[phone] = lead.id
 
         # 2. Batch validate in groups of 500
@@ -115,7 +114,10 @@ def process_broadcast_background(
             batch = phone_list[i:i+500]
             try:
                 validate_url = "https://api.fonnte.com/validate"
-                validate_payload = {'target': ",".join(batch)}
+                validate_payload = {
+                    'target': ",".join(batch),
+                    'countryCode': '0' # Disable automatic filtering to support multiple countries
+                }
                 validate_headers = {'Authorization': device_token}
                 
                 resp = requests.post(validate_url, data=validate_payload, headers=validate_headers)
@@ -145,8 +147,8 @@ def process_broadcast_background(
 
             # Check if number is registered
             phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
-            if phone.startswith("08"):
-                phone = "628" + phone[2:]
+            if phone.startswith("08") or phone.startswith("02"):
+                phone = "62" + phone[1:]
             
             if phone not in registered_numbers:
                 print(f"DEBUG [Broadcast User {user_id}]: Skipping unregistered number {phone} (Lead ID: {lead.id})")
@@ -182,8 +184,8 @@ def process_broadcast_background(
             payload = {
                 'target': phone,
                 'message': personalized_message,
-                'countryCode': '62',
-                'delay': delay, # Original delay from request (per-batch delay in Fonnte if they use it)
+                'countryCode': '0', # Disable automatic filtering
+                'delay': delay, # Original delay from request
             }
             headers = {'Authorization': device_token}
 
@@ -505,8 +507,8 @@ def create_device(
     # Call Fonnte API to add device
     # Clean phone number
     clean_device = device_data.device.replace(" ", "").replace("+", "").replace("-", "")
-    if clean_device.startswith("08"):
-        clean_device = "628" + clean_device[2:]
+    if clean_device.startswith("08") or clean_device.startswith("02"):
+        clean_device = "62" + clean_device[1:]
         
     # Call Fonnte API to add device
     url = "https://api.fonnte.com/add-device"
@@ -579,8 +581,8 @@ def update_device(
         
     # Clean current device number
     clean_device = device.device_number.replace(" ", "").replace("+", "").replace("-", "")
-    if clean_device.startswith("08"):
-        clean_device = "628" + clean_device[2:]
+    if clean_device.startswith("08") or clean_device.startswith("02"):
+        clean_device = "62" + clean_device[1:]
         
     # Call Fonnte API to update device
     url = "https://api.fonnte.com/update-device"
