@@ -129,56 +129,79 @@ def send_broadcast(
     else:
         raise HTTPException(status_code=400, detail="Template or custom content is required")
         
-    # 4. Prepare Fonnte request
-    target_numbers = []
+    # 4. Prepare and Send Messages
+    sent_count = 0
+    errors = []
+    fonnte_results = []
+
     for lead in leads:
-        if lead.phone:
-            phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
-            if phone.startswith("08"):
-                phone = "628" + phone[2:]
-            target_numbers.append(phone)
+        if not lead.phone:
+            continue
             
-    if not target_numbers:
-        raise HTTPException(status_code=400, detail="No valid phone numbers found in selected leads")
+        # Format phone number
+        phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
+        if phone.startswith("08"):
+            phone = "628" + phone[2:]
+            
+        # Personalize message if placeholders exist
+        personalized_message = message_content
+        placeholders = {
+            "{{name}}": lead.name or "",
+            "{{address}}": lead.address or "",
+            "{{phone}}": lead.phone or "",
+            "{{category}}": lead.category or ""
+        }
         
-    url = "https://api.fonnte.com/send"
-    payload = {
-        'target': ",".join(target_numbers),
-        'message': message_content,
-        'countryCode': '62',
-        'delay': request.delay,
-    }
-    headers = {
-        'Authorization': device_token
-    }
-    
-    try:
-        response = requests.post(url, data=payload, headers=headers)
-        result = response.json()
+        for placeholder, value in placeholders.items():
+            if placeholder in personalized_message:
+                personalized_message = personalized_message.replace(placeholder, str(value))
         
-        # Save to MessageHistory
-        if result.get("status"):
-            # Fonnte returns list of IDs for multiple targets
-            # Mapping result["id"] to target_numbers
-            for i, message_id in enumerate(result.get("id", [])):
-                if i < len(target_numbers):
+        # Send to Fonnte
+        url = "https://api.fonnte.com/send"
+        payload = {
+            'target': phone,
+            'message': personalized_message,
+            'countryCode': '62',
+            'delay': request.delay,
+        }
+        headers = {
+            'Authorization': device_token
+        }
+        
+        try:
+            response = requests.post(url, data=payload, headers=headers)
+            result = response.json()
+            fonnte_results.append(result)
+            
+            if result.get("status"):
+                message_id = result.get("id", [None])[0] if isinstance(result.get("id"), list) else result.get("id")
+                if message_id:
                     new_history = models.MessageHistory(
                         id=str(message_id),
                         user_id=current_user.id,
-                        target=target_numbers[i],
-                        message=message_content,
+                        target=phone,
+                        message=personalized_message,
                         status=result.get("process", "processing")
                     )
                     db.add(new_history)
-            db.commit()
+                    sent_count += 1
+            else:
+                errors.append(f"Failed to send to {phone}: {result.get('reason', 'Unknown error')}")
+                
+        except Exception as e:
+            errors.append(f"Error sending to {phone}: {str(e)}")
 
-        return {
-            "message": "Broadcast process finished",
-            "fonnte_response": result,
-            "targets_count": len(target_numbers)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Fonnte API error: {str(e)}")
+    db.commit()
+
+    if sent_count == 0 and errors:
+        raise HTTPException(status_code=500, detail=f"Failed to send any messages. Errors: {'; '.join(errors[:3])}...")
+
+    return {
+        "message": f"Broadcast process finished. Sent: {sent_count}, Errors: {len(errors)}",
+        "fonnte_response": fonnte_results[0] if fonnte_results else {"status": False},
+        "targets_count": sent_count,
+        "errors": errors if errors else None
+    }
 
 
 @router.get("/history", response_model=List[schemas.MessageHistoryResponse])
