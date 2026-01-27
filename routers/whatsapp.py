@@ -95,11 +95,61 @@ def process_broadcast_background(
         if not leads:
             return
 
+        # --- NEW: Number Validation Step ---
+        print(f"DEBUG [Broadcast User {user_id}]: Starting number validation for {len(leads)} leads...")
+        
+        registered_numbers = set()
+        all_normalized_numbers = {} # phone -> lead_id mapping for reverse lookup if needed
+        
+        # 1. Normalize all numbers
+        for lead in leads:
+            if lead.phone:
+                phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
+                if phone.startswith("08"):
+                    phone = "628" + phone[2:]
+                all_normalized_numbers[phone] = lead.id
+
+        # 2. Batch validate in groups of 500
+        phone_list = list(all_normalized_numbers.keys())
+        for i in range(0, len(phone_list), 500):
+            batch = phone_list[i:i+500]
+            try:
+                validate_url = "https://api.fonnte.com/validate"
+                validate_payload = {'target': ",".join(batch)}
+                validate_headers = {'Authorization': device_token}
+                
+                resp = requests.post(validate_url, data=validate_payload, headers=validate_headers)
+                val_result = resp.json()
+                
+                if val_result.get("status"):
+                    # Add all registered numbers to our set
+                    registered_in_batch = val_result.get("registered", [])
+                    registered_numbers.update(registered_in_batch)
+                    print(f"DEBUG [Broadcast User {user_id}]: Validated batch {i//500 + 1}. Registered: {len(registered_in_batch)}/{len(batch)}")
+                else:
+                    print(f"ERROR [Broadcast User {user_id}]: Validation API failed: {val_result.get('reason')}")
+                    # If validation fails, we might want to fail the whole thing or assume all are unregistered?
+                    # Let's assume all are unregistered to be safe if it explicitly fails.
+            except Exception as e:
+                print(f"ERROR [Broadcast User {user_id}]: Exception during validation: {str(e)}")
+
+        print(f"DEBUG [Broadcast User {user_id}]: Validation complete. Total registered: {len(registered_numbers)}")
+        # --- End of Validation Step ---
+
         sent_count = 0
         batch_limit = 20
 
         for i, lead in enumerate(leads):
             if not lead.phone:
+                continue
+
+            # Check if number is registered
+            phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
+            if phone.startswith("08"):
+                phone = "628" + phone[2:]
+            
+            if phone not in registered_numbers:
+                print(f"DEBUG [Broadcast User {user_id}]: Skipping unregistered number {phone} (Lead ID: {lead.id})")
                 continue
 
             # 1. Safe Delay (Random 30-60s)
@@ -115,10 +165,6 @@ def process_broadcast_background(
                     time.sleep(sleep_time)
 
             # 2. Personalize Message
-            phone = lead.phone.replace(" ", "").replace("+", "").replace("-", "")
-            if phone.startswith("08"):
-                phone = "628" + phone[2:]
-
             personalized_message = message_content
             placeholders = {
                 "{{name}}": lead.name or "",
