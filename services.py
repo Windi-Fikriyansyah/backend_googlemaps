@@ -9,7 +9,7 @@ import time
 SEARCH_API_KEY = os.getenv("SEARCH_API_KEY") # User should set this in .env
 SEARCH_API_URL = "https://www.searchapi.io/api/v1/search"
 
-geolocator = Nominatim(user_agent="lead_gen_app")
+geolocator = Nominatim(user_agent="WAMaps_LeadGenerator_v1.0", timeout=10)
 
 def get_coordinates(location_name: str):
     """
