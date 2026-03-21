@@ -24,14 +24,15 @@ def get_coordinates(location_name: str):
         print(f"Geocoding error: {e}")
         return None, None
 
-def search_google_maps(keyword: str, lat: float, lng: float, radius_km: float, max_results: int = 20, start_page: int = 1):
+def search_google_maps(keyword: str, lat: float, lng: float, radius_km: float, max_results: int = 20, start_page: int = 1, api_key: str = None):
     """
     Search Google Maps places nearby using SearchAPI.io.
     Fetches results starting from 'start_page' until 'max_results' total are found (or no more results).
     Prevents duplicates in the result list.
     """
-    if not SEARCH_API_KEY:
-        raise Exception("SEARCH_API_KEY not configured in .env.")
+    api_key_to_use = api_key or SEARCH_API_KEY
+    if not api_key_to_use:
+        raise Exception("Search API Key belum diisi. Silakan isi Search API Key Anda di menu Pengaturan terlebih dahulu agar bisa melakukan pencarian.")
 
     all_results = []
     seen_ids = set()
@@ -50,7 +51,7 @@ def search_google_maps(keyword: str, lat: float, lng: float, radius_km: float, m
             "engine": "google_maps",
             "q": keyword,
             "ll": ll_param,
-            "api_key": SEARCH_API_KEY,
+            "api_key": api_key_to_use,
             "page": current_page
         }
         

@@ -175,3 +175,29 @@ def logout(response: Response):
 @router.get("/me", response_model=schemas.UserResponse)
 def get_me(current_user: models.User = Depends(get_current_user_strict)):
     return current_user
+
+@router.put("/me", response_model=schemas.UserResponse)
+def update_me(
+    user_data: schemas.UserUpdate,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user_strict)
+):
+    if user_data.name is not None:
+        current_user.name = user_data.name
+    if user_data.email is not None:
+        # Check if email is already taken
+        if user_data.email != current_user.email:
+            existing_user = db.query(models.User).filter(models.User.email == user_data.email).first()
+            if existing_user:
+                raise HTTPException(status_code=400, detail="Email already registered")
+            current_user.email = user_data.email
+    if user_data.password is not None:
+        current_user.password_hash = get_password_hash(user_data.password)
+    if user_data.fonnte_token is not None:
+        current_user.fonnte_token = user_data.fonnte_token
+    if user_data.search_api_key is not None:
+        current_user.search_api_key = user_data.search_api_key
+        
+    db.commit()
+    db.refresh(current_user)
+    return current_user

@@ -22,9 +22,11 @@ class LeadResponse(LeadBase):
 
 class LeadSaveRequest(BaseModel):
     lead_id: int
+    category: Optional[str] = "General"
 
 class LeadSaveBatchRequest(BaseModel):
     lead_ids: List[int]
+    category: Optional[str] = "General"
 
 # Search
 class SearchRequest(BaseModel):
@@ -54,7 +56,16 @@ class UserResponse(UserBase):
     name: Optional[str] = None
     plan_type: str
     credits: int
+    fonnte_token: Optional[str] = None
+    search_api_key: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+    fonnte_token: Optional[str] = None
+    search_api_key: Optional[str] = None
 
 # Auth
 class Token(BaseModel):

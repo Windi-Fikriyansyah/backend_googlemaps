@@ -36,6 +36,7 @@ with engine.connect() as conn:
                 PRIMARY KEY (user_id, lead_id)
             )
         """))
+        conn.execute(text("ALTER TABLE user_saved_leads ADD COLUMN IF NOT EXISTS category VARCHAR DEFAULT 'General'"))
         
         # Create message_templates table
         conn.execute(text("""
@@ -65,6 +66,9 @@ with engine.connect() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR"))
         # Add credits column to users table
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS credits INTEGER DEFAULT 0"))
+        # Add fonnte_token and search_api_key to users table
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS fonnte_token VARCHAR"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS search_api_key VARCHAR"))
         # Add credits_deducted column to message_histories table
         conn.execute(text("ALTER TABLE message_histories ADD COLUMN IF NOT EXISTS credits_deducted BOOLEAN DEFAULT FALSE"))
         # Create transaction_histories table
@@ -89,12 +93,13 @@ with engine.connect() as conn:
 # Seed default user if not exists
 db = SessionLocal()
 try:
-    if not db.query(models.User).filter(models.User.id == 1).first():
+    if not db.query(models.User).filter(models.User.email == "admin@example.com").first():
         default_user = models.User(
             id=1,
             email="admin@example.com",
-            password_hash="hashed_password", # Placeholder
-            plan_type="pro"
+            password_hash="$2b$12$MxGIRK7kID2oNoL8kWXmu.PZJWr0xxOp531GQlb8XAzTgsM0oUMee", # Hash for 'admin123'
+            plan_type="pro",
+            credits=999999
         )
         db.add(default_user)
         db.commit()
@@ -106,7 +111,11 @@ app = FastAPI(title="Lead Generation API")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://wamaps.myxyzz.online"], # Updated for current dev port
+    allow_origins=[
+        "https://wamaps.myxyzz.online",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
 
     allow_methods=["*"],

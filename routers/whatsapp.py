@@ -68,6 +68,17 @@ def normalize_phone(phone: str, address: str = None) -> str:
 FONNTE_TOKEN = os.getenv("FONNTE_TOKEN", "REPLACE_WITH_YOUR_FONNTE_TOKEN")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
+def get_user_fonnte_token(user: models.User):
+    token = user.fonnte_token if user.fonnte_token else FONNTE_TOKEN
+    
+    # Check if the token is the default placeholder or empty
+    if not token or token == "REPLACE_WITH_YOUR_FONNTE_TOKEN":
+        raise HTTPException(
+            status_code=400, 
+            detail="Fonnte Token belum diisi. Silakan isi Fonnte Token Anda di menu Pengaturan terlebih dahulu agar bisa menggunakan fitur WhatsApp."
+        )
+    return token
+
 @router.get("/templates", response_model=List[schemas.MessageTemplateResponse])
 def get_templates(
     db: Session = Depends(database.get_db),
@@ -273,12 +284,7 @@ def send_broadcast(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user_strict)
 ):
-    # 0. Check if user has ANY credits
-    if current_user.credits <= 0:
-        raise HTTPException(
-            status_code=403, 
-            detail="Insufficient credits. Please top up your account to send messages."
-        )
+    # Credit check removed as requested
 
     # 1. Get Device Token
     device_token = ""
@@ -390,12 +396,7 @@ async def fonnte_webhook(
         
         if message:
             # Check for SENT status to deduct credit
-            if status == "sent" and not message.credits_deducted:
-                user = db.query(models.User).filter(models.User.id == message.user_id).first()
-                if user:
-                    user.credits = max(0, user.credits - 1)
-                    message.credits_deducted = True
-                    print(f"DEBUG: Deducted 1 credit from user {user.id} for message {message.id}")
+                # Credit deduction removed as requested
 
             if status:
                 message.status = status
@@ -515,12 +516,7 @@ def refresh_message_status(
                 new_status = result.get("message_status", msg.status)
                 if new_status and new_status != msg.status:
                     # Deduct credit if status becomes "sent"
-                    if new_status == "sent" and not msg.credits_deducted:
-                        user = db.query(models.User).filter(models.User.id == msg.user_id).first()
-                        if user:
-                            user.credits = max(0, user.credits - 1)
-                            msg.credits_deducted = True
-                            print(f"DEBUG: Deducted 1 credit from user {user.id} for message {msg.id} via refresh")
+                    # Credit deduction removed as requested
                     
                     msg.status = new_status
                     updated_count += 1
@@ -568,7 +564,7 @@ def create_device(
         'group': 'false'
     }
     headers = {
-        'Authorization': FONNTE_TOKEN # Account token from env
+        'Authorization': get_user_fonnte_token(current_user)
     }
     
     try:

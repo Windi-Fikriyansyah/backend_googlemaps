@@ -11,14 +11,14 @@ search_leads = Table(
     Column("lead_id", Integer, ForeignKey("leads.id", ondelete="CASCADE"), primary_key=True),
 )
 
-# Association table for User - Lead relationship (Saved Leads)
-user_saved_leads = Table(
-    "user_saved_leads",
-    Base.metadata,
-    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
-    Column("lead_id", Integer, ForeignKey("leads.id", ondelete="CASCADE"), primary_key=True),
-    Column("timestamp", DateTime(timezone=True), server_default=func.now()),
-)
+class SavedLead(Base):
+    __tablename__ = "user_saved_leads"
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE"), primary_key=True)
+    category = Column(String, default="General")
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+    lead = relationship("Lead")
 
 class User(Base):
     __tablename__ = "users"
@@ -28,10 +28,13 @@ class User(Base):
     name = Column(String, nullable=True)  # User's display name
     password_hash = Column(String)
     plan_type = Column(String, default="free")  # free/pro
-    credits = Column(Integer, default=0)  # User's credit balance
+    credits = Column(Integer, default=0)
+    fonnte_token = Column(String, nullable=True)
+    search_api_key = Column(String, nullable=True)
 
     searches = relationship("Search", back_populates="user")
-    saved_leads = relationship("Lead", secondary=user_saved_leads, back_populates="saved_by_users")
+    saved_leads_assoc = relationship("SavedLead", backref="user")
+    saved_leads = relationship("Lead", secondary="user_saved_leads", back_populates="saved_by_users", overlaps="saved_leads_assoc,user")
     message_templates = relationship("MessageTemplate", back_populates="user")
     whatsapp_devices = relationship("WhatsAppDevice", back_populates="user")
     message_histories = relationship("MessageHistory", back_populates="user")
@@ -76,7 +79,7 @@ class Lead(Base):
     category = Column(String, nullable=True)
 
     searches = relationship("Search", secondary=search_leads, back_populates="leads")
-    saved_by_users = relationship("User", secondary=user_saved_leads, back_populates="saved_leads")
+    saved_by_users = relationship("User", secondary="user_saved_leads", back_populates="saved_leads", overlaps="saved_leads_assoc,user")
 
 
 class WhatsAppDevice(Base):

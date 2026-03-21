@@ -29,12 +29,7 @@ def search_leads(
         user_id = current_user.id
         user = current_user
 
-    # 0.1 Check if user has ANY credits
-    if user.credits <= 0:
-        raise HTTPException(
-            status_code=403, 
-            detail="Insufficient credits. Please top up your account."
-        )
+    # Credit check removed as requested
     
     # 1. Identify all unique leads already stored for this criteria
     # We use func.lower() for case-insensitive matching
@@ -66,11 +61,8 @@ def search_leads(
             }
             leads_with_saved_status.append(lead_dict)
 
-        # Deduct credits for cached results
         num_results = len(leads_with_saved_status)
-        user.credits = max(0, user.credits - num_results)
-        db.commit()
-        db.refresh(user)
+        # Credit deduction removed as requested
 
         return schemas.SearchResponse(
             search_id=0, # Virtual or last search ID
@@ -94,14 +86,18 @@ def search_leads(
     gap = request.max_results - cached_count
 
     # Fetch ONLY what's missing
-    new_places = services.search_google_maps(
-        keyword=request.keyword,
-        lat=lat,
-        lng=lng,
-        radius_km=request.radius,
-        max_results=gap,
-        start_page=start_page
-    )
+    try:
+        new_places = services.search_google_maps(
+            keyword=request.keyword,
+            lat=lat,
+            lng=lng,
+            radius_km=request.radius,
+            max_results=gap,
+            start_page=start_page,
+            api_key=current_user.search_api_key if current_user else None
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     # 3. Create a new search record for this request
     new_search = models.Search(
@@ -143,11 +139,8 @@ def search_leads(
         }
         leads_with_saved_status.append(lead_dict)
 
-    # Deduct credits for new/combined results
     num_results = len(leads_with_saved_status)
-    user.credits = max(0, user.credits - num_results)
-    db.commit()
-    db.refresh(user)
+    # Credit deduction removed as requested
 
     return schemas.SearchResponse(
         search_id=new_search.id if cached_count < request.max_results else 0,
@@ -167,11 +160,44 @@ def save_lead(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     
-    if lead not in current_user.saved_leads:
-        current_user.saved_leads.append(lead)
+    # Check if already saved
+    existing = db.query(models.SavedLead).filter(
+        models.SavedLead.user_id == current_user.id,
+        models.SavedLead.lead_id == request.lead_id
+    ).first()
+
+    if not existing:
+        new_saved = models.SavedLead(
+            user_id=current_user.id,
+            lead_id=request.lead_id,
+            category=request.category or "General"
+        )
+        db.add(new_saved)
         db.commit()
-    
+    else:
+        # Update category if already exists?
+        existing.category = request.category or "General"
+        db.commit()
+
     return {"message": "Lead saved successfully"}
+
+@router.delete("/save/{lead_id}")
+def unsave_lead(
+    lead_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user_strict)
+):
+    saved_entry = db.query(models.SavedLead).filter(
+        models.SavedLead.user_id == current_user.id,
+        models.SavedLead.lead_id == lead_id
+    ).first()
+
+    if not saved_entry:
+        raise HTTPException(status_code=404, detail="Saved lead not found")
+    
+    db.delete(saved_entry)
+    db.commit()
+    return {"message": "Lead removed from saved"}
 
 @router.post("/save-batch")
 def save_leads_batch(
@@ -179,18 +205,29 @@ def save_leads_batch(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user_strict)
 ):
-    leads = db.query(models.Lead).filter(models.Lead.id.in_(request.lead_ids)).all()
-    
     count = 0
-    for lead in leads:
-        if lead not in current_user.saved_leads:
-            current_user.saved_leads.append(lead)
+    for lead_id in request.lead_ids:
+        # Check if already saved
+        existing = db.query(models.SavedLead).filter(
+            models.SavedLead.user_id == current_user.id,
+            models.SavedLead.lead_id == lead_id
+        ).first()
+
+        if not existing:
+            new_saved = models.SavedLead(
+                user_id=current_user.id,
+                lead_id=lead_id,
+                category=request.category or "General"
+            )
+            db.add(new_saved)
             count += 1
+        else:
+            existing.category = request.category or "General"
             
-    if count > 0:
+    if count > 0 or len(request.lead_ids) > 0:
         db.commit()
     
-    return {"message": f"{count} leads saved successfully"}
+    return {"message": f"{count} new leads saved successfully"}
 
 @router.get("/saved", response_model=List[schemas.LeadResponse])
 def get_saved_leads(
@@ -200,8 +237,9 @@ def get_saved_leads(
     # Simply return the relationship data
     # We map it to ensure the is_saved field is True
     leads = []
-    for lead in current_user.saved_leads:
-        lead_dict = schemas.LeadResponse.model_validate(lead)
-        lead_dict.is_saved = True
-        leads.append(lead_dict)
+    for saved in current_user.saved_leads_assoc:
+        lead_data = schemas.LeadResponse.model_validate(saved.lead)
+        lead_data.category = saved.category # USE THE SAVED CATEGORY INSTEAD OF ORIGINAL
+        lead_data.is_saved = True
+        leads.append(lead_data)
     return leads
