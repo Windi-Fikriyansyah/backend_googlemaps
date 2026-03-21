@@ -86,6 +86,8 @@ with engine.connect() as conn:
                 paid_at TIMESTAMP
             )
         """))
+        conn.execute(text("ALTER TABLE transaction_histories ADD COLUMN IF NOT EXISTS customer_name VARCHAR"))
+        conn.execute(text("ALTER TABLE transaction_histories ADD COLUMN IF NOT EXISTS customer_email VARCHAR"))
         conn.commit()
     except Exception as e:
         print(f"Auto-migration info (this might be normal): {e}")
@@ -125,9 +127,10 @@ app.add_middleware(
 
 app.include_router(leads.router)
 app.include_router(auth.router)
-from routers import whatsapp, payment
+from routers import whatsapp, payment, linkbayar
 app.include_router(whatsapp.router)
 app.include_router(payment.router)
+app.include_router(linkbayar.router)
 
 
 @app.get("/")

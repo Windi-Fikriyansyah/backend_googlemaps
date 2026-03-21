@@ -123,6 +123,8 @@ class TransactionHistory(Base):
     status = Column(String, default="UNPAID") # UNPAID, PAID, EXPIRED, FAILED
     method = Column(String, nullable=True) # Payment method
     payment_url = Column(String, nullable=True)
+    customer_name = Column(String, nullable=True)
+    customer_email = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     paid_at = Column(DateTime(timezone=True), nullable=True)
 
