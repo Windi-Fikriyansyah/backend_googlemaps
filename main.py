@@ -115,11 +115,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://wamaps.myxyzz.online",
-        "http://wamaps.myxyzz.online",
+        "https://www.wamaps.myxyzz.online",
+        "https://apiwamaps.myxyzz.online",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "https://*.myxyzz.online",
     ],
+    allow_origin_regex=r"https://.*\.myxyzz\.online",
     allow_credentials=True,
 
     allow_methods=["*"],
