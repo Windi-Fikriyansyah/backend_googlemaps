@@ -34,7 +34,7 @@ class User(Base):
 
     searches = relationship("Search", back_populates="user")
     saved_leads_assoc = relationship("SavedLead", backref="user")
-    saved_leads = relationship("Lead", secondary="user_saved_leads", back_populates="saved_by_users", overlaps="saved_leads_assoc,user")
+    saved_leads = relationship("Lead", secondary="user_saved_leads", back_populates="saved_by_users", overlaps="saved_leads_assoc,user,lead")
     message_templates = relationship("MessageTemplate", back_populates="user")
     whatsapp_devices = relationship("WhatsAppDevice", back_populates="user")
     message_histories = relationship("MessageHistory", back_populates="user")
@@ -79,7 +79,7 @@ class Lead(Base):
     category = Column(String, nullable=True)
 
     searches = relationship("Search", secondary=search_leads, back_populates="leads")
-    saved_by_users = relationship("User", secondary="user_saved_leads", back_populates="saved_leads", overlaps="saved_leads_assoc,user")
+    saved_by_users = relationship("User", secondary="user_saved_leads", back_populates="saved_leads", overlaps="saved_leads_assoc,user,lead")
 
 
 class WhatsAppDevice(Base):
