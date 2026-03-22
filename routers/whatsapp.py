@@ -699,9 +699,18 @@ def get_device_qr(
     
     try:
         response = requests.post(url, headers=headers)
-        return response.json()
+        result = response.json()
+        
+        if not result.get("url") and not result.get("status"):
+            # Return the specific reason from Fonnte if available
+            reason = result.get("reason", "Unknown error from Fonnte")
+            raise HTTPException(status_code=400, detail=f"Fonnte QR Error: {reason}")
+            
+        return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Fonnte QR error: {str(e)}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Fonnte QR context error: {str(e)}")
 
 @router.post("/devices/{device_id}/reconnect")
 def reconnect_device(
