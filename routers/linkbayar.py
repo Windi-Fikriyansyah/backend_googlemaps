@@ -97,6 +97,7 @@ def create_linkbayar_payment(
         
         return {
             "order_id": order_id,
+            "method": method,
             "payment_number": payment_data.get("payment_number"),
             "total_payment": payment_data.get("total_payment"),
             "fee": payment_data.get("fee"),
