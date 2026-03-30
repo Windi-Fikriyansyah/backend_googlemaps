@@ -13,7 +13,7 @@ router = APIRouter(prefix="/payments/linkbayar", tags=["linkbayar"])
 
 # Pricing
 PLANS = {
-    "premium": {"name": "Wamaps Premium", "price": 149000, "credits": 999999},
+    "premium": {"name": "Wamaps Premium", "price": 500, "credits": 999999},
 }
 
 class CreatePaymentRequest(BaseModel):
